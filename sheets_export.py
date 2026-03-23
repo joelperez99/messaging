@@ -202,8 +202,10 @@ def export_message_analysis(date_str: str, results: list, log_cb=None):
     # Leer datos existentes y filtrar filas que NO sean del mismo día
     existing = ws.get_all_values()
     if existing:
-        # Ignorar primera fila si es el header o está vacía
-        data_rows = existing[1:] if existing[0] == HEADER or not any(existing[0]) else existing
+        # Detectar si la primera fila es un header (cualquier versión anterior)
+        first = existing[0]
+        is_header = bool(first) and str(first[0]).strip().lower() == "fecha"
+        data_rows = existing[1:] if is_header else existing
         other_rows = [r for r in data_rows if r and r[0] != date_str]
     else:
         other_rows = []
