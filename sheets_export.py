@@ -26,7 +26,14 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 def _client():
-    creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
+    # En Streamlit Cloud las credenciales vienen de st.secrets["gcp_service_account"]
+    # Localmente se usa el archivo JSON
+    try:
+        import streamlit as st
+        info = dict(st.secrets["gcp_service_account"])
+        creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+    except Exception:
+        creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
     return gspread.authorize(creds)
 
 
