@@ -606,7 +606,7 @@ def main():
 
     for key, default in [("stored_token", ""), ("analysis_results", None),
                           ("analysis_date", None), ("analysis_logs", []),
-                          ("anthropic_key", "")]:
+                          ("anthropic_key", ""), ("sheets_status", None)]:
         if key not in st.session_state:
             st.session_state[key] = default
 
@@ -795,10 +795,11 @@ def main():
                             sheet_logs: list = []
                             export_message_analysis(day_str, results,
                                                     log_cb=sheet_logs.append)
-                            st.success("✓ Resultados guardados en Google Sheets "
-                                       "(pestaña 'Análisis Mensajes')")
+                            st.session_state.sheets_status = ("ok", "✓ Guardado en Google Sheets (pestaña 'Análisis Mensajes')")
                         except Exception as e:
-                            st.warning(f"Datos listos pero no se pudo guardar en Sheets: {e}")
+                            st.session_state.sheets_status = ("error", f"No se pudo guardar en Sheets: {e}")
+                    else:
+                        st.session_state.sheets_status = None
 
                     with st.expander("📋 Log de la consulta", expanded=False):
                         st.code("\n".join(ana_logs), language=None)
@@ -813,6 +814,14 @@ def main():
             results  = st.session_state.analysis_results
             day_str  = st.session_state.analysis_date
             total    = sum(r["cantidad"] for r in results)
+
+            # Estado de la exportación a Sheets (persiste entre rerenders)
+            if st.session_state.sheets_status:
+                status_type, status_msg = st.session_state.sheets_status
+                if status_type == "ok":
+                    st.success(status_msg)
+                else:
+                    st.error(status_msg)
 
             st.markdown(f"#### Resultados — {day_str}  ·  {total} mensajes analizados")
 
