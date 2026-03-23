@@ -398,8 +398,57 @@ def classify_message(text: str) -> str:
     return "Otro / General"
 
 
+_CATEGORIAS_LIST = list(CATEGORIAS.keys()) + ["Otro / General"]
+
+
+def classify_batch_claude(messages: list[str], api_key: str) -> list[str]:
+    """
+    Clasifica una lista de mensajes usando Claude.
+    Retorna una lista de categorías del mismo largo que `messages`.
+    """
+    import anthropic, json as _json
+
+    cats_str = "\n".join(f"- {c}" for c in _CATEGORIAS_LIST)
+    numbered = "\n".join(f"{i+1}. {m}" for i, m in enumerate(messages))
+
+    prompt = f"""Eres un asistente que clasifica mensajes de nuevos clientes de un producto de salud/nutrición llamado Crecelac.
+
+Categorías disponibles (elige EXACTAMENTE una de estas por mensaje):
+{cats_str}
+
+Mensajes a clasificar:
+{numbered}
+
+Instrucciones:
+- Clasifica cada mensaje según la intención principal del cliente.
+- Si el mensaje es solo un saludo ("Hola", "Buenos días", etc.) o expresa interés vago ("Me interesa", "Información"), clasifícalo como "Beneficios / Para qué sirve" si parece querer saber qué hace el producto, o como "Precio / Costo" si menciona querer comprarlo.
+- Solo usa "Otro / General" si realmente no encaja en ninguna categoría.
+- Responde ÚNICAMENTE con un JSON array de strings con exactamente {len(messages)} elementos, en el mismo orden que los mensajes.
+- Ejemplo: ["Precio / Costo", "Beneficios / Para qué sirve", "Dónde comprar"]
+
+JSON array:"""
+
+    client = anthropic.Anthropic(api_key=api_key)
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = resp.content[0].text.strip()
+    # Extraer el JSON array de la respuesta
+    start = raw.find("[")
+    end   = raw.rfind("]") + 1
+    categories = _json.loads(raw[start:end])
+    # Validar que cada categoría sea válida
+    return [
+        c if c in _CATEGORIAS_LIST else "Otro / General"
+        for c in categories
+    ]
+
+
 def fetch_and_analyze_day(token: str, day_str: str,
-                           max_convs: int = 200) -> tuple[list, list]:
+                           max_convs: int = 200,
+                           anthropic_key: str = "") -> tuple[list, list]:
     """
     Lee los primeros mensajes de nuevos contactos del día indicado y los clasifica.
     Retorna (results, logs)
@@ -440,7 +489,8 @@ def fetch_and_analyze_day(token: str, day_str: str,
     logs.append(f"  → {len(convs_raw)} convs desde ese día · "
                 f"{len(day_convs)} nuevos contactos a analizar")
 
-    classified: list[str] = []
+    # Recopilar textos de mensajes
+    texts: list[str] = []
     for conv in day_convs:
         try:
             msgs = api_paginate(f"{conv['id']}/messages", token, page_token,
@@ -450,13 +500,26 @@ def fetch_and_analyze_day(token: str, day_str: str,
             combined   = " ".join(m.get("message", "") for m in first_msgs
                                    if m.get("message"))
             if combined.strip():
-                classified.append(classify_message(combined))
+                texts.append(combined.strip())
         except RuntimeError:
             pass
 
-    if not classified:
+    if not texts:
         logs.append("  ⚠ No se encontraron mensajes para clasificar")
         return [], logs
+
+    # Clasificar con Claude si hay API key, si no usar palabras clave
+    if anthropic_key:
+        logs.append(f"  🤖 Clasificando {len(texts)} mensajes con Claude…")
+        try:
+            classified = classify_batch_claude(texts, anthropic_key)
+            logs.append(f"  ✓ Clasificación con IA completada")
+        except Exception as e:
+            logs.append(f"  ⚠ Claude falló ({e}), usando palabras clave…")
+            classified = [classify_message(t) for t in texts]
+    else:
+        logs.append(f"  📝 Clasificando con palabras clave (sin API key de IA)…")
+        classified = [classify_message(t) for t in texts]
 
     counts = Counter(classified)
     total  = len(classified)
@@ -542,9 +605,17 @@ def main():
         st.session_state.data = cached if cached.get("new_by_day") else None
 
     for key, default in [("stored_token", ""), ("analysis_results", None),
-                          ("analysis_date", None), ("analysis_logs", [])]:
+                          ("analysis_date", None), ("analysis_logs", []),
+                          ("anthropic_key", "")]:
         if key not in st.session_state:
             st.session_state[key] = default
+
+    # Leer clave de Anthropic desde secrets si existe
+    if not st.session_state.anthropic_key:
+        try:
+            st.session_state.anthropic_key = st.secrets.get("anthropic_api_key", "")
+        except Exception:
+            pass
 
     for key, default in [("view_mode", "days"), ("days_n", 30),
                           ("view_year", _now().year), ("view_month", _now().month),
@@ -591,6 +662,21 @@ def main():
         else:
             st.session_state.view_mode = "days"
             st.session_state.days_n = int(filtro.split()[0])
+
+        st.divider()
+
+        # ── IA Clasificación ───────────────────────────────────────────────────
+        st.markdown("**🤖 Clasificación con IA**")
+        st.caption("Opcional — mejora la clasificación de mensajes")
+        anthropic_input = st.text_input(
+            "Anthropic API Key", type="password",
+            placeholder="sk-ant-…",
+            value=st.session_state.anthropic_key,
+            help="Obtén una en console.anthropic.com. Si se configura en Secrets no es necesario pegarlo aquí.",
+            key="anthropic_key_input",
+        )
+        if anthropic_input.strip():
+            st.session_state.anthropic_key = anthropic_input.strip()
 
         st.divider()
 
@@ -693,7 +779,10 @@ def main():
                 day_str = sel_date.strftime("%Y-%m-%d")
                 try:
                     with st.spinner(f"Leyendo y clasificando mensajes del {day_str}…"):
-                        results, ana_logs = fetch_and_analyze_day(tok, day_str)
+                        results, ana_logs = fetch_and_analyze_day(
+                            tok, day_str,
+                            anthropic_key=st.session_state.get("anthropic_key", "")
+                        )
 
                     st.session_state.analysis_results = results
                     st.session_state.analysis_date    = day_str

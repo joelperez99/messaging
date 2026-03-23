@@ -3,3 +3,4 @@ matplotlib
 gspread
 google-auth
 streamlit
+anthropic
