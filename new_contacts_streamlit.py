@@ -364,10 +364,24 @@ def main():
       div[data-testid="stMetricValue"] { font-size: 2.2rem; }
       div[data-testid="stMetricLabel"] { font-size: 0.85rem; opacity: 0.75; }
 
-      /* Botones */
+      /* Botones generales */
       .stButton > button {
         border-radius: 6px;
         font-weight: 600;
+      }
+      /* Botones de navegación de mes (◀ ▶) */
+      [data-testid="column"]:first-child .stButton > button,
+      [data-testid="column"]:last-child  .stButton > button {
+        font-size: 1.6rem !important;
+        padding: 6px 0 !important;
+        background-color: #1a1f2e !important;
+        border: 1px solid #2a3450 !important;
+        color: #1e88e5 !important;
+      }
+      [data-testid="column"]:first-child .stButton > button:hover,
+      [data-testid="column"]:last-child  .stButton > button:hover {
+        background-color: #1e88e5 !important;
+        color: white !important;
       }
 
       /* Radio buttons — etiquetas más visibles */
@@ -439,30 +453,6 @@ def main():
 
         if filtro == "Por mes":
             st.session_state.view_mode = "month"
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col1:
-                if st.button("◀", key="prev_month"):
-                    if st.session_state.view_month == 1:
-                        st.session_state.view_month = 12
-                        st.session_state.view_year -= 1
-                    else:
-                        st.session_state.view_month -= 1
-                    st.rerun()
-            with col2:
-                st.markdown(
-                    f"<div style='text-align:center;font-weight:bold;color:#1e88e5'>"
-                    f"{MONTHS_ES[st.session_state.view_month]}<br>"
-                    f"{st.session_state.view_year}</div>",
-                    unsafe_allow_html=True,
-                )
-            with col3:
-                if st.button("▶", key="next_month"):
-                    if st.session_state.view_month == 12:
-                        st.session_state.view_month = 1
-                        st.session_state.view_year += 1
-                    else:
-                        st.session_state.view_month += 1
-                    st.rerun()
         else:
             st.session_state.view_mode = "days"
             st.session_state.days_n = int(filtro.split()[0])
@@ -539,6 +529,43 @@ def main():
     c4.metric("⬆️ Máx. en un día",  bval)
 
     st.markdown("---")
+
+    # ── Navegación de mes (siempre visible) ────────────────────────────────────
+    nav_l, nav_c, nav_r = st.columns([1, 4, 1])
+
+    with nav_l:
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        if st.button("◀", key="prev_month", use_container_width=True,
+                     help="Mes anterior"):
+            st.session_state.view_mode = "month"
+            if st.session_state.view_month == 1:
+                st.session_state.view_month = 12
+                st.session_state.view_year -= 1
+            else:
+                st.session_state.view_month -= 1
+            st.rerun()
+
+    with nav_c:
+        mo_name = MONTHS_ES[st.session_state.view_month]
+        yr_val  = st.session_state.view_year
+        st.markdown(
+            f"<div style='text-align:center; font-size:1.6rem; font-weight:700;"
+            f"color:#1e88e5; padding:4px 0;'>"
+            f"{mo_name} &nbsp; {yr_val}</div>",
+            unsafe_allow_html=True,
+        )
+
+    with nav_r:
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        if st.button("▶", key="next_month", use_container_width=True,
+                     help="Mes siguiente"):
+            st.session_state.view_mode = "month"
+            if st.session_state.view_month == 12:
+                st.session_state.view_month = 1
+                st.session_state.view_year += 1
+            else:
+                st.session_state.view_month += 1
+            st.rerun()
 
     # ── Calendario ─────────────────────────────────────────────────────────────
     fig, _ = build_figure(
