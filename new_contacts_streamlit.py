@@ -351,15 +351,45 @@ def main():
         initial_sidebar_state="expanded",
     )
 
-    # CSS mínimo para oscurecer el fondo y ajustar métricas
+    # CSS complementario (los colores base vienen de .streamlit/config.toml)
     st.markdown("""
     <style>
-      [data-testid="stAppViewContainer"] { background-color: #0f1117; }
-      [data-testid="stSidebar"]          { background-color: #1a1f2e; }
-      [data-testid="stMetric"]           { background-color: #1a1f2e;
-                                           border-radius: 8px; padding: 12px; }
-      div[data-testid="stMetricValue"]   { font-size: 2rem; }
-      .stButton > button                 { border-radius: 6px; }
+      /* Tarjetas de métricas */
+      [data-testid="stMetric"] {
+        background-color: #1a1f2e;
+        border-radius: 10px;
+        padding: 16px 20px;
+        border: 1px solid #2a3450;
+      }
+      div[data-testid="stMetricValue"] { font-size: 2.2rem; }
+      div[data-testid="stMetricLabel"] { font-size: 0.85rem; opacity: 0.75; }
+
+      /* Botones */
+      .stButton > button {
+        border-radius: 6px;
+        font-weight: 600;
+      }
+
+      /* Radio buttons — etiquetas más visibles */
+      [data-testid="stRadio"] label {
+        font-size: 0.95rem !important;
+        padding: 4px 0;
+      }
+
+      /* Sidebar items */
+      [data-testid="stSidebar"] label,
+      [data-testid="stSidebar"] p,
+      [data-testid="stSidebar"] span {
+        color: #e8eaf0 !important;
+      }
+
+      /* Select box texto */
+      [data-testid="stSelectbox"] div {
+        color: #e8eaf0;
+      }
+
+      /* Divider */
+      hr { border-color: #2a3450; }
     </style>
     """, unsafe_allow_html=True)
 

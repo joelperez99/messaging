@@ -14,5 +14,5 @@ __pycache__/
 *.pyo
 .env
 
-# Streamlit
+# Streamlit (solo excluir secrets, no config)
 .streamlit/secrets.toml
