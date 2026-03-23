@@ -348,20 +348,24 @@ CATEGORIAS: dict[str, list[str]] = {
         "precio", "costo", "cuánto cuesta", "cuanto cuesta", "cuánto vale",
         "cuanto vale", "cuánto es", "cuanto es", "cuánto cobran",
         "cuanto cobran", "cuánto sale", "cuanto sale", "tarifa",
-        "cobran", "pesos", "dólares", "dolares", "quetzales",
+        "cobran", "pesos", "dólares", "dolares", "quetzales", "bs.",
+        "soles", "cuánto está", "cuanto esta",
     ],
     "Dónde comprar": [
         "dónde comprar", "donde comprar", "dónde lo venden", "donde lo venden",
         "dónde conseguir", "donde conseguir", "dónde adquirir", "donde adquirir",
         "dónde lo encuentro", "donde lo encuentro", "dónde lo hay",
         "donde lo hay", "dónde venden", "donde venden",
-        "punto de venta", "tienda", "farmacia", "supermercado",
+        "punto de venta", "tienda", "farmacia", "supermercado", "sucursal",
+        "ciudad", "estado", "país",
     ],
     "Beneficios / Para qué sirve": [
         "para qué sirve", "para que sirve", "beneficios", "propiedades",
         "qué hace", "que hace", "sirve para", "efectos", "resultado",
         "funciona para", "para qué es", "para que es", "qué es", "que es",
-        "ayuda con", "ayuda a",
+        "ayuda con", "ayuda a", "información", "informacion", "info",
+        "me pueden", "me podrian", "me podrían", "quisiera saber",
+        "quiero saber", "quiero información",
     ],
     "Cómo usar / Dosis": [
         "cómo se toma", "como se toma", "dosis", "cómo usar", "como usar",
@@ -372,20 +376,42 @@ CATEGORIAS: dict[str, list[str]] = {
     "Composición / Ingredientes": [
         "ingredientes", "composición", "composicion", "qué contiene",
         "que contiene", "qué tiene", "que tiene", "componentes",
-        "natural", "fórmula", "formula",
+        "natural", "fórmula", "formula", "gluten", "lactosa", "azúcar",
     ],
     "Distribución / Mayoreo": [
         "distribuidor", "distribuidora", "distribución", "distribucion",
         "mayoreo", "mayorista", "por mayor", "revendedor", "reventa",
-        "negocio", "empresa", "representante",
+        "negocio", "empresa", "representante", "franquicia",
     ],
     "Disponibilidad / Stock": [
         "disponible", "hay stock", "tienen disponible", "agotado",
         "cuándo llega", "cuando llega", "cuándo hay", "cuando hay", "stock",
     ],
+    "Pedido / Envío": [
+        "pedido", "pedir", "comprar", "quiero uno", "quiero comprar",
+        "envío", "envio", "enviar", "delivery", "domicilio", "a domicilio",
+        "despacho", "llegó", "llego", "rastreo", "seguimiento", "paquete",
+        "cuándo llega mi", "cuando llega mi",
+    ],
+    "Promociones / Descuentos": [
+        "promoción", "promocion", "descuento", "oferta", "precio especial",
+        "2x1", "gratis", "regalo", "combo", "paquete", "promo",
+        "black friday", "cyber", "rebaja",
+    ],
+    "Vacantes / Empleo": [
+        "vacante", "empleo", "trabajo", "contratan", "están contratando",
+        "estan contratando", "plaza", "bolsa de trabajo", "cv", "curriculum",
+        "sueldo", "salario", "horario laboral",
+    ],
     "Efectos secundarios": [
         "efectos secundarios", "contraindicaciones", "reacciones",
         "alergia", "daña", "hace daño", "es seguro", "peligroso",
+        "embarazo", "embarazada", "niños", "bebes", "bebés",
+    ],
+    "Testimonio / Resultado personal": [
+        "me funcionó", "me funciono", "me ayudó", "me ayudo",
+        "yo lo use", "lo usé", "mi experiencia", "les cuento",
+        "gracias", "excelente producto", "muy bueno",
     ],
 }
 
@@ -411,7 +437,7 @@ def classify_batch_claude(messages: list[str], api_key: str) -> list[str]:
     cats_str = "\n".join(f"- {c}" for c in _CATEGORIAS_LIST)
     numbered = "\n".join(f"{i+1}. {m}" for i, m in enumerate(messages))
 
-    prompt = f"""Eres un asistente que clasifica mensajes de nuevos clientes de un producto de salud/nutrición llamado Crecelac.
+    prompt = f"""Eres un asistente que clasifica mensajes de nuevos clientes de un producto de salud/nutrición llamado Crecelac (suplemento alimenticio).
 
 Categorías disponibles (elige EXACTAMENTE una de estas por mensaje):
 {cats_str}
@@ -420,11 +446,16 @@ Mensajes a clasificar:
 {numbered}
 
 Instrucciones:
-- Clasifica cada mensaje según la intención principal del cliente.
-- Si el mensaje es solo un saludo ("Hola", "Buenos días", etc.) o expresa interés vago ("Me interesa", "Información"), clasifícalo como "Beneficios / Para qué sirve" si parece querer saber qué hace el producto, o como "Precio / Costo" si menciona querer comprarlo.
-- Solo usa "Otro / General" si realmente no encaja en ninguna categoría.
-- Responde ÚNICAMENTE con un JSON array de strings con exactamente {len(messages)} elementos, en el mismo orden que los mensajes.
-- Ejemplo: ["Precio / Costo", "Beneficios / Para qué sirve", "Dónde comprar"]
+- Clasifica según la INTENCIÓN PRINCIPAL del cliente, aunque el mensaje sea corto o informal.
+- Saludos solos ("Hola", "Buenos días", "Buenas"): usa "Beneficios / Para qué sirve" ya que buscan información general.
+- "Me interesa", "información por favor", "vi su anuncio": usa "Beneficios / Para qué sirve".
+- "Quiero comprar", "cómo lo pido", "me mandan uno": usa "Pedido / Envío".
+- Si preguntan precio Y dónde comprar en el mismo mensaje: usa "Precio / Costo".
+- Si el mensaje es claramente de alguien buscando trabajo: usa "Vacantes / Empleo".
+- Si el mensaje parece enviado por error, es spam, o es completamente irrelevante al producto: usa "Otro / General".
+- Solo usa "Otro / General" cuando realmente no encaje en ninguna otra categoría.
+- Responde ÚNICAMENTE con un JSON array de strings con exactamente {len(messages)} elementos, en el mismo orden.
+- Ejemplo: ["Precio / Costo", "Beneficios / Para qué sirve", "Pedido / Envío"]
 
 JSON array:"""
 

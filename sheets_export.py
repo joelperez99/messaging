@@ -197,13 +197,15 @@ def export_message_analysis(date_str: str, results: list, log_cb=None):
     ss = _client().open_by_key(SPREADSHEET_ID)
     ws = _get_or_create_tab(ss, "Análisis Mensajes")
 
+    HEADER = ["Fecha", "Motivo de contacto", "Cantidad", "% del total"]
+
     # Leer datos existentes y filtrar filas que NO sean del mismo día
     existing = ws.get_all_values()
     if existing:
-        header = existing[0]
-        other_rows = [r for r in existing[1:] if r and r[0] != date_str]
+        # Ignorar primera fila si es el header o está vacía
+        data_rows = existing[1:] if existing[0] == HEADER or not any(existing[0]) else existing
+        other_rows = [r for r in data_rows if r and r[0] != date_str]
     else:
-        header = ["Fecha", "Motivo de contacto", "Cantidad", "% del total"]
         other_rows = []
 
     new_rows = [
@@ -212,6 +214,6 @@ def export_message_analysis(date_str: str, results: list, log_cb=None):
     ]
 
     ws.clear()
-    ws.append_rows([header] + other_rows + new_rows, value_input_option="USER_ENTERED")
+    ws.append_rows([HEADER] + other_rows + new_rows, value_input_option="USER_ENTERED")
     log(f"  ✓ {len(new_rows)} categorías guardadas para {date_str}")
     log("✓ Análisis guardado correctamente")
