@@ -174,3 +174,37 @@ def export_messenger_stats(data: dict, log_cb=None):
     log(f"  ✓ 'Fuentes Anuncios' — {len(rows)} fuentes")
 
     log("✓ Exportación de Messenger Stats completada")
+
+
+# ── Exportar Análisis de Mensajes ─────────────────────────────────────────────
+def export_message_analysis(date_str: str, results: list, log_cb=None):
+    """
+    Guarda el análisis de mensajes del día indicado en la pestaña 'Análisis Mensajes'.
+    Si ya existen filas para ese día, se borran y se reemplazan con los nuevos resultados.
+
+    results: lista de dicts con claves: motivo, cantidad, porcentaje
+    """
+    def log(msg): log_cb and log_cb(msg)
+
+    log("☁ Guardando análisis de mensajes en Google Sheets…")
+    ss = _client().open_by_key(SPREADSHEET_ID)
+    ws = _get_or_create_tab(ss, "Análisis Mensajes")
+
+    # Leer datos existentes y filtrar filas que NO sean del mismo día
+    existing = ws.get_all_values()
+    if existing:
+        header = existing[0]
+        other_rows = [r for r in existing[1:] if r and r[0] != date_str]
+    else:
+        header = ["Fecha", "Motivo de contacto", "Cantidad", "% del total"]
+        other_rows = []
+
+    new_rows = [
+        [date_str, r["motivo"], r["cantidad"], f"{r['porcentaje']}%"]
+        for r in results
+    ]
+
+    ws.clear()
+    ws.append_rows([header] + other_rows + new_rows, value_input_option="USER_ENTERED")
+    log(f"  ✓ {len(new_rows)} categorías guardadas para {date_str}")
+    log("✓ Análisis guardado correctamente")

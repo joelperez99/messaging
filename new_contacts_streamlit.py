@@ -341,6 +341,126 @@ def build_figure(new_by_day: dict, view_mode: str, days_n: int,
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  Clasificación de mensajes
+# ══════════════════════════════════════════════════════════════════════════════
+CATEGORIAS: dict[str, list[str]] = {
+    "Precio / Costo": [
+        "precio", "costo", "cuánto cuesta", "cuanto cuesta", "cuánto vale",
+        "cuanto vale", "cuánto es", "cuanto es", "cuánto cobran",
+        "cuanto cobran", "cuánto sale", "cuanto sale", "tarifa",
+        "cobran", "pesos", "dólares", "dolares", "quetzales",
+    ],
+    "Dónde comprar": [
+        "dónde comprar", "donde comprar", "dónde lo venden", "donde lo venden",
+        "dónde conseguir", "donde conseguir", "dónde adquirir", "donde adquirir",
+        "dónde lo encuentro", "donde lo encuentro", "dónde lo hay",
+        "donde lo hay", "dónde venden", "donde venden",
+        "punto de venta", "tienda", "farmacia", "supermercado",
+    ],
+    "Beneficios / Para qué sirve": [
+        "para qué sirve", "para que sirve", "beneficios", "propiedades",
+        "qué hace", "que hace", "sirve para", "efectos", "resultado",
+        "funciona para", "para qué es", "para que es", "qué es", "que es",
+        "ayuda con", "ayuda a",
+    ],
+    "Cómo usar / Dosis": [
+        "cómo se toma", "como se toma", "dosis", "cómo usar", "como usar",
+        "instrucciones", "modo de uso", "cuánto tomar", "cuanto tomar",
+        "cuántas veces", "cuantas veces", "cómo se usa", "como se usa",
+        "cómo lo tomo", "como lo tomo", "cada cuánto", "cada cuanto",
+    ],
+    "Composición / Ingredientes": [
+        "ingredientes", "composición", "composicion", "qué contiene",
+        "que contiene", "qué tiene", "que tiene", "componentes",
+        "natural", "fórmula", "formula",
+    ],
+    "Distribución / Mayoreo": [
+        "distribuidor", "distribuidora", "distribución", "distribucion",
+        "mayoreo", "mayorista", "por mayor", "revendedor", "reventa",
+        "negocio", "empresa", "representante",
+    ],
+    "Disponibilidad / Stock": [
+        "disponible", "hay stock", "tienen disponible", "agotado",
+        "cuándo llega", "cuando llega", "cuándo hay", "cuando hay", "stock",
+    ],
+    "Efectos secundarios": [
+        "efectos secundarios", "contraindicaciones", "reacciones",
+        "alergia", "daña", "hace daño", "es seguro", "peligroso",
+    ],
+}
+
+
+def classify_message(text: str) -> str:
+    t = text.lower()
+    for category, keywords in CATEGORIAS.items():
+        if any(kw in t for kw in keywords):
+            return category
+    return "Otro / General"
+
+
+def fetch_and_analyze_day(token: str, day_str: str,
+                           max_convs: int = 200) -> tuple[list, list]:
+    """
+    Lee los primeros mensajes de nuevos contactos del día indicado y los clasifica.
+    Retorna (results, logs)
+    results = [{"motivo": str, "cantidad": int, "porcentaje": float}, ...]
+    """
+    from collections import Counter
+    logs: list[str] = []
+
+    day_dt     = datetime.strptime(day_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    since_ts   = int(day_dt.timestamp())
+
+    page_token = resolve_page_token(token, logs)
+
+    logs.append(f"Obteniendo conversaciones del {day_str}…")
+    convs_raw = api_paginate(f"{PAGE_ID}/conversations", token, page_token, params={
+        "platform": "messenger",
+        "fields"  : "id,updated_time,message_count",
+        "limit"   : 100,
+        "since"   : since_ts,
+    })
+
+    MSG_THRESHOLD = 8
+    day_convs = [
+        c for c in convs_raw
+        if c.get("updated_time", "")[:10] == day_str
+        and c.get("message_count", 99) <= MSG_THRESHOLD
+    ][:max_convs]
+
+    logs.append(f"  → {len(convs_raw)} convs desde ese día · "
+                f"{len(day_convs)} nuevos contactos a analizar")
+
+    classified: list[str] = []
+    for conv in day_convs:
+        try:
+            msgs = api_paginate(f"{conv['id']}/messages", token, page_token,
+                params={"fields": "message,created_time", "limit": 10})
+            # Los mensajes vienen más nuevo→más viejo; los últimos son el inicio de la conv.
+            first_msgs = msgs[-3:] if len(msgs) >= 3 else msgs
+            combined   = " ".join(m.get("message", "") for m in first_msgs
+                                   if m.get("message"))
+            if combined.strip():
+                classified.append(classify_message(combined))
+        except RuntimeError:
+            pass
+
+    if not classified:
+        logs.append("  ⚠ No se encontraron mensajes para clasificar")
+        return [], logs
+
+    counts = Counter(classified)
+    total  = len(classified)
+    results = [
+        {"motivo": cat, "cantidad": cnt,
+         "porcentaje": round(cnt / total * 100, 1)}
+        for cat, cnt in sorted(counts.items(), key=lambda x: -x[1])
+    ]
+    logs.append(f"  ✓ {total} mensajes clasificados · {len(results)} categorías")
+    return results, logs
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  App Streamlit
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
@@ -412,6 +532,11 @@ def main():
         cached = cache_load()
         st.session_state.data = cached if cached.get("new_by_day") else None
 
+    for key, default in [("stored_token", ""), ("analysis_results", None),
+                          ("analysis_date", None), ("analysis_logs", [])]:
+        if key not in st.session_state:
+            st.session_state[key] = default
+
     for key, default in [("view_mode", "days"), ("days_n", 30),
                           ("view_year", _now().year), ("view_month", _now().month),
                           ("logs", [])]:
@@ -438,8 +563,9 @@ def main():
                     try:
                         data, logs = fetch_new_contacts(
                             token.strip(), since_days=90, max_convs=max_convs)
-                        st.session_state.data = data
-                        st.session_state.logs = logs
+                        st.session_state.data         = data
+                        st.session_state.logs         = logs
+                        st.session_state.stored_token = token.strip()
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
@@ -529,68 +655,146 @@ def main():
     c4.metric("⬆️ Máx. en un día",  bval)
 
     st.markdown("---")
+    tab_cal, tab_ana = st.tabs(["📅  Calendario", "🔍  Análisis de Mensajes"])
 
-    # ── Navegación de mes (siempre visible) ────────────────────────────────────
-    nav_l, nav_c, nav_r = st.columns([1, 4, 1])
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_ana:
+        st.markdown("### 🔍 Análisis de mensajes por día")
+        st.caption("Lee los primeros mensajes de nuevos contactos del día seleccionado "
+                   "y los clasifica por motivo. Se guarda automáticamente en Google Sheets.")
 
-    with nav_l:
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        if st.button("◀", key="prev_month", use_container_width=True,
-                     help="Mes anterior"):
-            st.session_state.view_mode = "month"
-            if st.session_state.view_month == 1:
-                st.session_state.view_month = 12
-                st.session_state.view_year -= 1
+        col_d, col_b = st.columns([2, 1])
+        with col_d:
+            sel_date = st.date_input(
+                "Día a analizar",
+                value=_now().date(),
+                max_value=_now().date(),
+                label_visibility="visible",
+            )
+        with col_b:
+            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+            run_btn = st.button("🔍  Analizar mensajes", use_container_width=True,
+                                type="primary", key="btn_analyze")
+
+        if run_btn:
+            tok = st.session_state.get("stored_token", "")
+            if not tok:
+                st.error("Primero carga los datos con tu token (pestaña Calendario).")
             else:
-                st.session_state.view_month -= 1
-            st.rerun()
+                day_str = sel_date.strftime("%Y-%m-%d")
+                with st.spinner(f"Leyendo y clasificando mensajes del {day_str}…"):
+                    results, ana_logs = fetch_and_analyze_day(tok, day_str)
 
-    with nav_c:
-        mo_name = MONTHS_ES[st.session_state.view_month]
-        yr_val  = st.session_state.view_year
-        st.markdown(
-            f"<div style='text-align:center; font-size:1.6rem; font-weight:700;"
-            f"color:#1e88e5; padding:4px 0;'>"
-            f"{mo_name} &nbsp; {yr_val}</div>",
-            unsafe_allow_html=True,
+                st.session_state.analysis_results = results
+                st.session_state.analysis_date    = day_str
+                st.session_state.analysis_logs    = ana_logs
+
+                if results:
+                    # Guardar en Sheets automáticamente
+                    try:
+                        from sheets_export import export_message_analysis
+                        sheet_logs: list = []
+                        export_message_analysis(day_str, results,
+                                                log_cb=sheet_logs.append)
+                        st.success("✓ Resultados guardados en Google Sheets "
+                                   "(pestaña 'Análisis Mensajes')")
+                    except Exception as e:
+                        st.warning(f"Datos listos pero no se pudo guardar en Sheets: {e}")
+
+                with st.expander("📋 Log de la consulta", expanded=False):
+                    st.code("\n".join(ana_logs), language=None)
+
+        # Mostrar resultados guardados en session_state
+        if st.session_state.analysis_results and st.session_state.analysis_date:
+            results  = st.session_state.analysis_results
+            day_str  = st.session_state.analysis_date
+            total    = sum(r["cantidad"] for r in results)
+
+            st.markdown(f"#### Resultados — {day_str}  ·  {total} mensajes analizados")
+
+            # Tabla principal
+            st.dataframe(
+                [{"Motivo de contacto": r["motivo"],
+                  "Cantidad": r["cantidad"],
+                  "% del total": f"{r['porcentaje']}%"}
+                 for r in results],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            # Gráfico de barras horizontal
+            import pandas as pd
+            df = pd.DataFrame(results).set_index("motivo")[["cantidad"]]
+            df.index.name = "Motivo"
+            st.bar_chart(df, horizontal=True)
+
+        elif not run_btn:
+            st.info("Selecciona un día y presiona **Analizar mensajes** para ver "
+                    "los motivos de contacto de ese día.")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_cal:
+        # ── Navegación de mes ─────────────────────────────────────────────────
+        nav_l, nav_c, nav_r = st.columns([1, 4, 1])
+
+        with nav_l:
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            if st.button("◀", key="prev_month", use_container_width=True,
+                         help="Mes anterior"):
+                st.session_state.view_mode = "month"
+                if st.session_state.view_month == 1:
+                    st.session_state.view_month = 12
+                    st.session_state.view_year -= 1
+                else:
+                    st.session_state.view_month -= 1
+                st.rerun()
+
+        with nav_c:
+            mo_name = MONTHS_ES[st.session_state.view_month]
+            yr_val  = st.session_state.view_year
+            st.markdown(
+                f"<div style='text-align:center; font-size:1.6rem; font-weight:700;"
+                f"color:#1e88e5; padding:4px 0;'>"
+                f"{mo_name} &nbsp; {yr_val}</div>",
+                unsafe_allow_html=True,
+            )
+
+        with nav_r:
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            if st.button("▶", key="next_month", use_container_width=True,
+                         help="Mes siguiente"):
+                st.session_state.view_mode = "month"
+                if st.session_state.view_month == 12:
+                    st.session_state.view_month = 1
+                    st.session_state.view_year += 1
+                else:
+                    st.session_state.view_month += 1
+                st.rerun()
+
+        # ── Calendario ────────────────────────────────────────────────────────
+        fig, _ = build_figure(
+            new_by_day,
+            st.session_state.view_mode,
+            st.session_state.days_n,
+            st.session_state.view_year,
+            st.session_state.view_month,
         )
+        st.pyplot(fig, use_container_width=True)
+        plt.close(fig)
 
-    with nav_r:
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        if st.button("▶", key="next_month", use_container_width=True,
-                     help="Mes siguiente"):
-            st.session_state.view_mode = "month"
-            if st.session_state.view_month == 12:
-                st.session_state.view_month = 1
-                st.session_state.view_year += 1
+        # ── Tabla de datos ────────────────────────────────────────────────────
+        with st.expander("📋 Ver datos en tabla"):
+            rows = [{"Fecha": d, "Nuevos contactos": v}
+                    for d, v in sorted(period.items(), reverse=True) if v > 0]
+            if rows:
+                st.dataframe(rows, use_container_width=True, hide_index=True)
             else:
-                st.session_state.view_month += 1
-            st.rerun()
+                st.info("Sin datos en el período seleccionado.")
 
-    # ── Calendario ─────────────────────────────────────────────────────────────
-    fig, _ = build_figure(
-        new_by_day,
-        st.session_state.view_mode,
-        st.session_state.days_n,
-        st.session_state.view_year,
-        st.session_state.view_month,
-    )
-    st.pyplot(fig, use_container_width=True)
-    plt.close(fig)
-
-    # ── Tabla de datos ─────────────────────────────────────────────────────────
-    with st.expander("📋 Ver datos en tabla"):
-        rows = [{"Fecha": d, "Nuevos contactos": v}
-                for d, v in sorted(period.items(), reverse=True) if v > 0]
-        if rows:
-            st.dataframe(rows, use_container_width=True, hide_index=True)
-        else:
-            st.info("Sin datos en el período seleccionado.")
-
-    # ── Log de carga ───────────────────────────────────────────────────────────
-    if st.session_state.logs:
-        with st.expander("🔍 Log de la última carga"):
-            st.code("\n".join(st.session_state.logs), language=None)
+        # ── Log de carga ──────────────────────────────────────────────────────
+        if st.session_state.logs:
+            with st.expander("🔍 Log de la última carga"):
+                st.code("\n".join(st.session_state.logs), language=None)
 
 
 if __name__ == "__main__":
