@@ -414,12 +414,21 @@ def fetch_and_analyze_day(token: str, day_str: str,
     page_token = resolve_page_token(token, logs)
 
     logs.append(f"Obteniendo conversaciones del {day_str}…")
-    convs_raw = api_paginate(f"{PAGE_ID}/conversations", token, page_token, params={
-        "platform": "messenger",
-        "fields"  : "id,updated_time,message_count",
-        "limit"   : 100,
-        "since"   : since_ts,
-    })
+    try:
+        convs_raw = api_paginate(f"{PAGE_ID}/conversations", token, page_token, params={
+            "platform": "messenger",
+            "fields"  : "id,updated_time,message_count",
+            "limit"   : 100,
+            "since"   : since_ts,
+        })
+    except RuntimeError as e:
+        # Intentar sin el filtro `since` y filtrar manualmente por fecha
+        logs.append(f"  ⚠ Filtro 'since' falló ({e}), obteniendo todas y filtrando…")
+        convs_raw = api_paginate(f"{PAGE_ID}/conversations", token, page_token, params={
+            "platform": "messenger",
+            "fields"  : "id,updated_time,message_count",
+            "limit"   : 100,
+        })
 
     MSG_THRESHOLD = 8
     day_convs = [
@@ -682,27 +691,33 @@ def main():
                 st.error("Primero carga los datos con tu token (pestaña Calendario).")
             else:
                 day_str = sel_date.strftime("%Y-%m-%d")
-                with st.spinner(f"Leyendo y clasificando mensajes del {day_str}…"):
-                    results, ana_logs = fetch_and_analyze_day(tok, day_str)
+                try:
+                    with st.spinner(f"Leyendo y clasificando mensajes del {day_str}…"):
+                        results, ana_logs = fetch_and_analyze_day(tok, day_str)
 
-                st.session_state.analysis_results = results
-                st.session_state.analysis_date    = day_str
-                st.session_state.analysis_logs    = ana_logs
+                    st.session_state.analysis_results = results
+                    st.session_state.analysis_date    = day_str
+                    st.session_state.analysis_logs    = ana_logs
 
-                if results:
-                    # Guardar en Sheets automáticamente
-                    try:
-                        from sheets_export import export_message_analysis
-                        sheet_logs: list = []
-                        export_message_analysis(day_str, results,
-                                                log_cb=sheet_logs.append)
-                        st.success("✓ Resultados guardados en Google Sheets "
-                                   "(pestaña 'Análisis Mensajes')")
-                    except Exception as e:
-                        st.warning(f"Datos listos pero no se pudo guardar en Sheets: {e}")
+                    if results:
+                        # Guardar en Sheets automáticamente
+                        try:
+                            from sheets_export import export_message_analysis
+                            sheet_logs: list = []
+                            export_message_analysis(day_str, results,
+                                                    log_cb=sheet_logs.append)
+                            st.success("✓ Resultados guardados en Google Sheets "
+                                       "(pestaña 'Análisis Mensajes')")
+                        except Exception as e:
+                            st.warning(f"Datos listos pero no se pudo guardar en Sheets: {e}")
 
-                with st.expander("📋 Log de la consulta", expanded=False):
-                    st.code("\n".join(ana_logs), language=None)
+                    with st.expander("📋 Log de la consulta", expanded=False):
+                        st.code("\n".join(ana_logs), language=None)
+
+                except Exception as exc:
+                    st.error(f"Error al analizar mensajes: {exc}")
+                    st.info("Verifica que el token tenga permisos `pages_messaging` "
+                            "y `pages_read_engagement`.")
 
         # Mostrar resultados guardados en session_state
         if st.session_state.analysis_results and st.session_state.analysis_date:
