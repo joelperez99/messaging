@@ -494,19 +494,19 @@ def fetch_and_analyze_day(token: str, day_str: str,
     page_token = resolve_page_token(token, logs)
 
     logs.append(f"Obteniendo conversaciones del {day_str}…")
+    CONV_FIELDS = "id,updated_time,message_count,participants"
     try:
         convs_raw = api_paginate(f"{PAGE_ID}/conversations", token, page_token, params={
             "platform": "messenger",
-            "fields"  : "id,updated_time,message_count",
+            "fields"  : CONV_FIELDS,
             "limit"   : 100,
             "since"   : since_ts,
         })
     except RuntimeError as e:
-        # Intentar sin el filtro `since` y filtrar manualmente por fecha
         logs.append(f"  ⚠ Filtro 'since' falló ({e}), obteniendo todas y filtrando…")
         convs_raw = api_paginate(f"{PAGE_ID}/conversations", token, page_token, params={
             "platform": "messenger",
-            "fields"  : "id,updated_time,message_count",
+            "fields"  : CONV_FIELDS,
             "limit"   : 100,
         })
 
@@ -520,18 +520,28 @@ def fetch_and_analyze_day(token: str, day_str: str,
     logs.append(f"  → {len(convs_raw)} convs desde ese día · "
                 f"{len(day_convs)} nuevos contactos a analizar")
 
-    # Recopilar textos de mensajes
-    texts: list[str] = []
+    # Recopilar textos + nombre de usuario por conversación
+    texts:      list[str] = []
+    user_names: list[str] = []
+
     for conv in day_convs:
+        # Extraer nombre del participante (excluir la página)
+        parts = conv.get("participants", {}).get("data", [])
+        name = "Desconocido"
+        for p in parts:
+            if str(p.get("id")) != PAGE_ID:
+                name = p.get("name", "Desconocido")
+                break
+
         try:
             msgs = api_paginate(f"{conv['id']}/messages", token, page_token,
                 params={"fields": "message,created_time", "limit": 10})
-            # Los mensajes vienen más nuevo→más viejo; los últimos son el inicio de la conv.
             first_msgs = msgs[-3:] if len(msgs) >= 3 else msgs
             combined   = " ".join(m.get("message", "") for m in first_msgs
                                    if m.get("message"))
             if combined.strip():
                 texts.append(combined.strip())
+                user_names.append(name)
         except RuntimeError:
             pass
 
@@ -552,11 +562,17 @@ def fetch_and_analyze_day(token: str, day_str: str,
         logs.append(f"  📝 Clasificando con palabras clave (sin API key de IA)…")
         classified = [classify_message(t) for t in texts]
 
+    # Agrupar usuarios por categoría
+    category_users: dict[str, list[str]] = {}
+    for cat, user in zip(classified, user_names):
+        category_users.setdefault(cat, []).append(user)
+
     counts = Counter(classified)
     total  = len(classified)
     results = [
         {"motivo": cat, "cantidad": cnt,
-         "porcentaje": round(cnt / total * 100, 1)}
+         "porcentaje": round(cnt / total * 100, 1),
+         "usuarios": category_users.get(cat, [])}
         for cat, cnt in sorted(counts.items(), key=lambda x: -x[1])
     ]
     logs.append(f"  ✓ {total} mensajes clasificados · {len(results)} categorías")
@@ -871,6 +887,28 @@ def main():
             df = pd.DataFrame(results).set_index("motivo")[["cantidad"]]
             df.index.name = "Motivo"
             st.bar_chart(df, horizontal=True)
+
+            # ── Detalle de usuarios por categoría ─────────────────────────────
+            st.markdown("---")
+            cat_options = ["— Selecciona una categoría —"] + [r["motivo"] for r in results]
+            selected_cat = st.selectbox(
+                "👥 Ver usuarios por categoría:",
+                cat_options,
+                key="cat_selector",
+            )
+            if selected_cat != "— Selecciona una categoría —":
+                usuarios = next(
+                    (r["usuarios"] for r in results if r["motivo"] == selected_cat), []
+                )
+                st.markdown(f"**{len(usuarios)} usuario(s) en '{selected_cat}':**")
+                if usuarios:
+                    st.dataframe(
+                        [{"#": i+1, "Nombre": u} for i, u in enumerate(usuarios)],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.info("Sin nombres disponibles.")
 
         elif not run_btn:
             st.info("Selecciona un día y presiona **Analizar mensajes** para ver "

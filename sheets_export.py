@@ -197,7 +197,7 @@ def export_message_analysis(date_str: str, results: list, log_cb=None):
     ss = _client().open_by_key(SPREADSHEET_ID)
     ws = _get_or_create_tab(ss, "Análisis Mensajes")
 
-    HEADER = ["Fecha", "Motivo de contacto", "Cantidad", "% del total"]
+    HEADER = ["Fecha", "Motivo de contacto", "Cantidad", "% del total", "Usuarios"]
 
     # Leer datos existentes y filtrar filas que NO sean del mismo día
     existing = ws.get_all_values()
@@ -209,7 +209,8 @@ def export_message_analysis(date_str: str, results: list, log_cb=None):
         other_rows = []
 
     new_rows = [
-        [date_str, r["motivo"], r["cantidad"], f"{r['porcentaje']}%"]
+        [date_str, r["motivo"], r["cantidad"], f"{r['porcentaje']}%",
+         ", ".join(r.get("usuarios", []))]
         for r in results
     ]
 
