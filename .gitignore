@@ -1,0 +1,18 @@
+# Credenciales de Google Service Account
+*.json
+
+# Caché y datos locales
+messenger_cache.json
+new_contacts_cache.json
+dashboard_data.json
+debug_report.json
+debug_report.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Streamlit
+.streamlit/secrets.toml
