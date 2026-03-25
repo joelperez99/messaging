@@ -653,7 +653,10 @@ def main():
 
     for key, default in [("stored_token", ""), ("analysis_results", None),
                           ("analysis_date", None), ("analysis_logs", []),
-                          ("anthropic_key", ""), ("sheets_status", None)]:
+                          ("anthropic_key", ""), ("sheets_status", None),
+                          ("active_tiers", ["S", "A", "B"]),
+                          ("cfg_month", _now().month),
+                          ("cfg_year",  _now().year)]:
         if key not in st.session_state:
             st.session_state[key] = default
 
@@ -797,7 +800,7 @@ def main():
     c4.metric("⬆️ Máx. en un día",  bval)
 
     st.markdown("---")
-    tab_cal, tab_ana = st.tabs(["📅  Calendario", "🔍  Análisis de Mensajes"])
+    tab_cal, tab_ana, tab_cfg = st.tabs(["📅  Calendario", "🔍  Análisis de Mensajes", "⚙️  Configuración"])
 
     # ══════════════════════════════════════════════════════════════════════════
     with tab_ana:
@@ -977,6 +980,54 @@ def main():
         if st.session_state.logs:
             with st.expander("🔍 Log de la última carga"):
                 st.code("\n".join(st.session_state.logs), language=None)
+
+
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_cfg:
+        st.markdown("### ⚙️ Configuración")
+        st.divider()
+
+        # ── Tiers activos ──────────────────────────────────────────────────────
+        st.markdown("**Tiers activos**")
+        selected_tiers = st.pills(
+            "Tiers",
+            options=["S", "A", "B", "C", "D"],
+            selection_mode="multi",
+            default=st.session_state.active_tiers,
+            label_visibility="collapsed",
+            key="tier_pills",
+        )
+        if selected_tiers is not None:
+            st.session_state.active_tiers = selected_tiers
+
+        st.divider()
+
+        # ── Período de referencia ──────────────────────────────────────────────
+        st.markdown("**Período de referencia**")
+        col_m, col_y = st.columns(2)
+        with col_m:
+            mes_sel = st.selectbox(
+                "Mes",
+                options=list(range(1, 13)),
+                format_func=lambda m: MONTHS_ES[m],
+                index=st.session_state.cfg_month - 1,
+                key="cfg_mes",
+            )
+            st.session_state.cfg_month = mes_sel
+        with col_y:
+            anio_sel = st.number_input(
+                "Año",
+                min_value=2020,
+                max_value=2030,
+                value=st.session_state.cfg_year,
+                step=1,
+                key="cfg_anio",
+            )
+            st.session_state.cfg_year = int(anio_sel)
+
+        st.divider()
+        st.caption(f"Tiers activos: {', '.join(st.session_state.active_tiers) or 'Ninguno'}")
+        st.caption(f"Período: {MONTHS_ES[st.session_state.cfg_month]} {st.session_state.cfg_year}")
 
 
 if __name__ == "__main__":
